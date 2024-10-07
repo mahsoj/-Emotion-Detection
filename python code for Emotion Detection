@@ -1,0 +1,68 @@
+import os
+import librosa
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout
+from tensorflow.keras.callbacks import EarlyStopping
+
+# Load audio files and extract features
+def load_audio_features(audio_folder):
+    features = []
+    labels = []
+    
+    for label in os.listdir(audio_folder):
+        label_folder = os.path.join(audio_folder, label)
+        
+        if not os.path.isdir(label_folder):
+            continue
+        
+        for file in os.listdir(label_folder):
+            if file.endswith('.wav'):
+                file_path = os.path.join(label_folder, file)
+                try:
+                    # Load audio file
+                    signal, sr = librosa.load(file_path, sr=22050)
+                    # Extract MFCC features
+                    mfccs = librosa.feature.mfcc(y=signal, sr=sr, n_mfcc=13)
+                    mfccs_mean = np.mean(mfccs.T, axis=0)
+                    features.append(mfccs_mean)
+                    labels.append(label)
+                except Exception as e:
+                    print(f"Error processing {file_path}: {e}")
+    
+    if not features:
+        raise ValueError("No features found. Check your audio folder.")
+
+    return np.array(features), np.array(labels)
+
+# Prepare the dataset
+audio_folder = 'path/to/your/audio/files'  # Replace with your folder path
+X, y = load_audio_features(audio_folder)
+
+# Encode labels to integers
+label_map = {label: idx for idx, label in enumerate(np.unique(y))}
+y_encoded = np.array([label_map[label] for label in y])
+
+# Split the dataset into training and validation sets
+X_train, X_val, y_train, y_val = train_test_split(X, y_encoded, test_size=0.2, random_state=42)
+
+# Build the model
+model = Sequential()
+model.add(Dense(128, activation='relu', input_shape=(X_train.shape[1],)))
+model.add(Dropout(0.5))
+model.add(Dense(64, activation='relu'))
+model.add(Dropout(0.5))
+model.add(Dense(len(label_map), activation='softmax'))
+
+# Compile the model
+model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+
+# Train the model with early stopping
+early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+history = model.fit(X_train, y_train, epochs=50, batch_size=32, validation_data=(X_val, y_val), callbacks=[early_stopping])
+
+# Evaluate the model
+loss, accuracy = model.evaluate(X_val, y_val)
+print(f"Loss: {loss}, Accuracy: {accuracy}")
